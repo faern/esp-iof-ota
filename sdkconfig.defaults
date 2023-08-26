@@ -13,3 +13,8 @@ CONFIG_RTC_CLOCK_BBPLL_POWER_ON_WITH_USB=y
 CONFIG_ESP_PHY_ENABLE_USB=y
 
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Enable https server
+CONFIG_ESP_HTTPS_SERVER_ENABLE=y
+# FIXME: The https session handshakes takes forever. Must be a better way?
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10

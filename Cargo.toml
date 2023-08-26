@@ -24,6 +24,7 @@ esp-idf-svc = { version = "0.46"  }
 embedded-svc = { version = "0.25" }
 anyhow = "1.0.75"
 esp-ota = "0.2.0"
+const-str = "0.5.6"
 
 [build-dependencies]
 embuild = "0.31.2"

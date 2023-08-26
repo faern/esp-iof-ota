@@ -6,8 +6,6 @@
 //! curl --progress-bar -X POST --data-binary @build/esp32-softap-ota.bin http://192.168.4.1/update
 //! ```
 
-use std::{thread::sleep, time::Duration};
-
 use embedded_svc::{
     http::{Headers, Method},
     io::Write,
@@ -18,14 +16,24 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     http::server::EspHttpServer,
     nvs::EspDefaultNvsPartition,
+    tls::X509,
     wifi::{BlockingWifi, EspWifi},
 };
-use esp_idf_sys::{self as _};
-use esp_idf_sys::{self as _, esp, ESP_ERR_NVS_NEW_VERSION_FOUND, ESP_ERR_NVS_NO_FREE_PAGES}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
+use esp_idf_sys::{self as _, esp, ESP_ERR_NVS_NEW_VERSION_FOUND, ESP_ERR_NVS_NO_FREE_PAGES};
+use std::{thread::sleep, time::Duration}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
 
-const SSID: &str = env!("WIFI_SSID");
-const PASSWORD: &str = env!("WIFI_PASS");
+static SSID: &str = env!("WIFI_SSID");
+static PASSWORD: &str = env!("WIFI_PASS");
 static INDEX_HTML: &str = include_str!("index.html");
+
+static CERTIFICATE: X509 = X509::pem_until_nul(const_str::concat_bytes!(
+    include_bytes!("../certs/server_certificate.pem"),
+    b"\0"
+));
+static PRIVATE_KEY: X509 = X509::pem_until_nul(const_str::concat_bytes!(
+    include_bytes!("../certs/private_key.pem"),
+    b"\0"
+));
 
 const STACK_SIZE: usize = 10240;
 
@@ -93,7 +101,7 @@ fn main() -> anyhow::Result<()> {
         response.flush()?;
         drop(response);
 
-        log::info!("Rebooting into new app in 500 ms...");
+        log::info!("Rebooting into new app in 1000 ms...");
         sleep(Duration::from_millis(1000));
         completed_ota.restart();
     })?;
@@ -129,7 +137,8 @@ fn setup_wifi() -> anyhow::Result<BlockingWifi<EspWifi<'static>>> {
 
     log::info!(
         "Created Wi-Fi with WIFI_SSID `{}` and WIFI_PASS `{}`",
-        SSID, PASSWORD
+        SSID,
+        PASSWORD
     );
 
     Ok(wifi)
@@ -138,6 +147,10 @@ fn setup_wifi() -> anyhow::Result<BlockingWifi<EspWifi<'static>>> {
 fn setup_httpd() -> anyhow::Result<EspHttpServer> {
     let server_configuration = esp_idf_svc::http::server::Configuration {
         stack_size: STACK_SIZE,
+        http_port: 80,
+        https_port: 443,
+        server_certificate: Some(CERTIFICATE),
+        private_key: Some(PRIVATE_KEY),
         ..Default::default()
     };
 
