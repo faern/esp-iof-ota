@@ -20,7 +20,11 @@ use esp_idf_svc::{
     wifi::{BlockingWifi, EspWifi},
 };
 use esp_idf_sys::{self as _, esp, ESP_ERR_NVS_NEW_VERSION_FOUND, ESP_ERR_NVS_NO_FREE_PAGES};
-use std::{thread::sleep, time::Duration}; // If using the `binstart` feature of `esp-idf-sys`, always keep this module imported
+use std::{
+    sync::atomic::{AtomicU8, Ordering},
+    thread::{self, sleep},
+    time::Duration,
+};
 
 static SSID: &str = env!("WIFI_SSID");
 static PASSWORD: &str = env!("WIFI_PASS");
@@ -36,6 +40,8 @@ static PRIVATE_KEY: X509 = X509::pem_until_nul(const_str::concat_bytes!(
 ));
 
 const STACK_SIZE: usize = 10240;
+
+static OTA_STATE: AtomicU8 = AtomicU8::new(0);
 
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
@@ -60,6 +66,15 @@ fn main() -> anyhow::Result<()> {
     })?;
 
     server.fn_handler("/update", Method::Post, |mut req| {
+        if OTA_STATE
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            req.into_status_response(409)?
+                .write_all(b"Update already in progress")?;
+            return Ok(());
+        }
+
         let mut remaining = req.content_len().unwrap_or(0) as usize;
         log::info!("Starting OTA update with {remaining} bytes of app binary");
 
@@ -101,9 +116,12 @@ fn main() -> anyhow::Result<()> {
         response.flush()?;
         drop(response);
 
-        log::info!("Rebooting into new app in 1000 ms...");
-        sleep(Duration::from_millis(1000));
-        completed_ota.restart();
+        thread::spawn(move || {
+            log::info!("Rebooting into new app in 10000 ms...");
+            sleep(Duration::from_millis(10000));
+            // completed_ota.restart();
+        });
+        Ok(())
     })?;
 
     core::mem::forget(server);
