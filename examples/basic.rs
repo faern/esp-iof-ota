@@ -41,8 +41,6 @@ static PRIVATE_KEY: X509 = X509::pem_until_nul(const_str::concat_bytes!(
 
 const STACK_SIZE: usize = 10240;
 
-static OTA_STATE: AtomicU8 = AtomicU8::new(0);
-
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
@@ -65,64 +63,11 @@ fn main() -> anyhow::Result<()> {
         Ok(())
     })?;
 
-    server.fn_handler("/update", Method::Post, |mut req| {
-        if OTA_STATE
-            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            req.into_status_response(409)?
-                .write_all(b"Update already in progress")?;
-            return Ok(());
-        }
+    let ota_handler = esp_iof_ota::OtaHandler::new(|event| {
+        log::info!("OTA event: {event:?}");
+    });
 
-        let mut remaining = req.content_len().unwrap_or(0) as usize;
-        log::info!("Starting OTA update with {remaining} bytes of app binary");
-
-        let mut buf = vec![0u8; 1024];
-        let mut ota = esp_ota::OtaUpdate::begin()?;
-
-        while remaining > 0 {
-            match req.read(&mut buf) {
-                Ok(len) => {
-                    assert!(len > 0);
-                    log::info!("Writing {len} bytes of OTA update to flash");
-                    match ota.write(&buf[..len]) {
-                        Ok(()) => (),
-                        Err(e) => {
-                            let msg = format!("Failed to write app data to flash: {e}");
-                            log::error!("{msg}");
-                            req.into_status_response(500)?.write_all(msg.as_bytes())?;
-                            return Ok(());
-                        }
-                    }
-                    remaining -= len;
-                }
-                Err(e) => {
-                    let msg = format!("Failed to read app binary from request: {e}");
-                    log::error!("{msg}");
-                    req.into_status_response(500)?
-                        .write_all(b"Failed to read request body")?;
-                    return Ok(());
-                }
-            }
-        }
-
-        log::info!("Done writing OTA update to flash");
-        let mut completed_ota = ota.finalize()?;
-        completed_ota.set_as_boot_partition()?;
-
-        let mut response = req.into_ok_response()?;
-        response.write_all(b"Firmware update complete")?;
-        response.flush()?;
-        drop(response);
-
-        thread::spawn(move || {
-            log::info!("Rebooting into new app in 10000 ms...");
-            sleep(Duration::from_millis(10000));
-            // completed_ota.restart();
-        });
-        Ok(())
-    })?;
+    server.handler("/update", Method::Post, ota_handler)?;
 
     core::mem::forget(server);
     core::mem::forget(wifi);
