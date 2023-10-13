@@ -10,6 +10,8 @@ use esp_idf_sys::{self as _};
 use std::cmp;
 use std::sync::atomic::{AtomicU8, Ordering};
 
+pub use esp_ota::mark_app_valid;
+
 const READ_BUF_SIZE: usize = 1024;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
